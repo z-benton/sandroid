@@ -15,18 +15,51 @@ class NaturalVoiceInstrumentation : Instrumentation() {
     private var settingsOnly = false
     private var scrollingOnly = false
     private var oneCoreOnly = false
+    private var bootOnly = false
+    private var requireLocked = false
+    private var bootVoice: String? = null
     override fun onCreate(arguments: Bundle?) {
         super.onCreate(arguments)
         previewOnly = arguments?.getString("previewOnly") == "true"
         settingsOnly = arguments?.getString("settingsOnly") == "true"
         scrollingOnly = arguments?.getString("scrollingOnly") == "true"
         oneCoreOnly = arguments?.getString("oneCoreOnly") == "true"
+        bootOnly = arguments?.getString("bootOnly") == "true"
+        requireLocked = arguments?.getString("requireLocked") == "true"
+        bootVoice = arguments?.getString("bootVoice")
         start()
     }
 
     override fun onStart() {
         val results = Bundle()
         try {
+            if (bootOnly) {
+                val unlocked = targetContext.getSystemService(android.os.UserManager::class.java).isUserUnlocked
+                check(!requireLocked || !unlocked) { "Unlock already occurred; reboot without unlocking to test Direct Boot" }
+                val component = android.content.ComponentName(targetContext, SandroidTtsService::class.java)
+                check(targetContext.packageManager.getServiceInfo(component, 0).directBootAware)
+                val storage = TtsStorage.context(targetContext)
+                check(storage.isDeviceProtectedStorage)
+                val prefs = TtsStorage.settings(targetContext)
+                SpeechDiagnostics.record(targetContext, "Direct Boot check; user unlocked=$unlocked")
+                check(VoiceAssets.install(targetContext).parentFile == storage.filesDir)
+                val savedVoice = prefs.getString("voice", null)
+                try {
+                    bootVoice?.let { id ->
+                        val voice = VoiceCatalog.byNameOrLocale(id)
+                        check(voice != null && VoiceAssets.isAvailable(targetContext, voice)) { "Boot test voice unavailable: $id" }
+                        check(prefs.edit().putString("voice", voice.id).commit())
+                    }
+                    testSystemService(naturalOnly = false)
+                } finally {
+                    if (bootVoice != null) {
+                        check(prefs.edit().putString("voice", savedVoice).commit())
+                    }
+                }
+                results.putString("stream", "Boot speech: TTS binding and WAV synthesis passed; user unlocked=$unlocked.\n")
+                finish(Activity.RESULT_OK, results)
+                return
+            }
             if (oneCoreOnly) {
                 OneCoreChecks(this).run()
                 results.putString("stream", "OneCore: all thirteen voices produced PCM; Eva cancellation and recovery passed.\n")
@@ -132,19 +165,19 @@ class NaturalVoiceInstrumentation : Instrumentation() {
         }
     }
 
-    private fun testSystemService() {
+    private fun testSystemService(naturalOnly: Boolean = true) {
         val initialized = CountDownLatch(1)
         var initCode = TextToSpeech.ERROR
         val tts = TextToSpeech(targetContext, { code -> initCode = code; initialized.countDown() },
             "com.quinton.sandroid")
-        val wav = File(targetContext.cacheDir, "natural-service-test.wav")
+        val wav = File(TtsStorage.context(targetContext).cacheDir, "natural-service-test.wav")
         try {
             check(initialized.await(30, TimeUnit.SECONDS) && initCode == TextToSpeech.SUCCESS) { "TTS service initialization failed" }
-            val voices = tts.voices.filter { it.name.endsWith("(Natural)") }
+            val voices = tts.voices.filter { !naturalOnly || it.name.endsWith("(Natural)") }
             val expected = VoiceCatalog.voices.filter {
-                it.engine == Engine.NEURAL && VoiceAssets.isAvailable(targetContext, it)
+                (!naturalOnly || it.engine == Engine.NEURAL) && VoiceAssets.isAvailable(targetContext, it)
             }.map { it.name }.toSet()
-            check(voices.map { it.name }.toSet() == expected && voices.none { it.isNetworkConnectionRequired }) { "Natural voices not registered as offline" }
+            check(voices.map { it.name }.toSet() == expected && voices.none { it.isNetworkConnectionRequired }) { "Packaged voices not registered as offline" }
             check(tts.setVoice(voices.first()) == TextToSpeech.SUCCESS)
             val done = CountDownLatch(1)
             var failed = false
@@ -156,6 +189,9 @@ class NaturalVoiceInstrumentation : Instrumentation() {
             check(tts.synthesizeToFile("Hello from Android's text to speech service.", Bundle(), wav, "natural-smoke") == TextToSpeech.SUCCESS)
             check(done.await(30, TimeUnit.SECONDS) && !failed && wav.length() > 44) { "TTS service did not produce a WAV" }
             check(wav.inputStream().use { String(it.readNBytes(4), Charsets.US_ASCII) } == "RIFF")
+            check(wav.inputStream().use { input -> input.skip(44); input.readBytes().any { it != 0.toByte() } }) {
+                "TTS service produced silent PCM"
+            }
             sendStatus(0, Bundle().apply { putString("stream", "Android TTS service: ${voices.size} offline voices registered; synthesized WAV (${wav.length()} bytes)\n") })
         } finally {
             tts.shutdown()

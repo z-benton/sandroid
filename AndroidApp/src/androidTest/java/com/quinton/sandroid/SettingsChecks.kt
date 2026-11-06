@@ -1,7 +1,6 @@
 package com.quinton.sandroid
 
 import android.app.Instrumentation
-import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.speech.tts.TextToSpeech
@@ -35,7 +34,7 @@ internal class SettingsChecks(private val instrumentation: Instrumentation) {
         val anna = VoiceCatalog.voices.single { it.id == "anna" }
         check(anna.engine == Engine.ANNA && anna.engine.settingsGroup == Engine.SAPI5)
 
-        val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+        val prefs = TtsStorage.settings(context)
         val saved = prefs.all
         var activity: MainActivity? = null
         try {
@@ -115,7 +114,7 @@ internal class SettingsChecks(private val instrumentation: Instrumentation) {
         try {
             check(initialized.await(30, TimeUnit.SECONDS) && initCode == TextToSpeech.SUCCESS)
             for (percent in listOf(0, 200)) {
-                check(context.getSharedPreferences("settings", Context.MODE_PRIVATE).edit()
+                check(TtsStorage.settings(context).edit()
                     .putInt(PcmVolume.KEY, percent).commit())
                 val done = CountDownLatch(1)
                 var failed = false

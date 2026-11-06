@@ -41,7 +41,7 @@ internal object VoiceAssets {
 
     @Synchronized
     fun install(context: Context): File {
-        val root = File(context.filesDir, "voice-data")
+        val root = File(TtsStorage.context(context).filesDir, "voice-data")
         if (verifiedRoot == root && root.isDirectory) return root
         check(root.isDirectory || root.mkdirs()) { "Cannot create voice-data folder" }
         val entries = context.assets.open("voice-assets.sha256").bufferedReader().use { it.readLines() }

@@ -117,6 +117,18 @@ Outputs are named `build/Sandroid-<versionName>-<target>.apk`. These commands us
 
 The APK includes a size/SHA-256 manifest for its staged voice files. On the first speech request in each app process, the installer verifies existing files and atomically replaces missing, incomplete, outdated, or corrupted copies from the APK. This also repairs partial nonempty files left by older builds without uninstalling or clearing settings. Copy failures are reported rather than silently retaining unusable data. Subsequent requests reuse the verified installation in that process.
 
+Sandroid supports Android Direct Boot: when selected as the system TTS engine, it can speak on the boot lock screen **before the first PIN/password unlock**, including for a Direct Boot capable screen reader. Android binds the TTS service when speech is requested. Voice files, speech settings, neural working files, and the last speech diagnostic use device protected storage, available before unlock. On upgrade, open Sandroid once while unlocked to migrate the saved voice and controls before rebooting. Voice files are installed from the APK into device protected storage on first use; the first request can take longer while installing/verifying data. An upgrade rebooted before settings migration uses the default voice until unlock.
+
+To verify boot speech on a test device, install the app and instrumentation APKs below, open Sandroid once, select it as the system TTS engine, enable the screen reader, and configure a secure PIN/password. Reboot without unlocking and check spoken feedback on the PIN/password screen. With an already authorized ADB connection, also run:
+
+```sh
+adb shell am instrument -w -e bootOnly true -e requireLocked true com.quinton.sandroid.test/com.quinton.sandroid.NaturalVoiceInstrumentation
+```
+
+This check rejects an already unlocked user, verifies Direct Boot registration and storage access, then binds the real TTS service and requires a non-silent synthesized WAV. Repeat after the first unlock and after locking again, using `-e bootOnly true` without `-e requireLocked true`, to check continued speech. Test both a classic and a natural voice by saving each before reboot. A normal screen lock after the first unlock does not test Direct Boot.
+
+Direct Boot is implemented and has been confirmed working in user testing. The automated Direct Boot check also passed on the Android 15 ARM64 emulator with a secure PIN configured: the user remained `RUNNING_LOCKED`, and both the saved Aria natural voice and an Anna test override produced non-silent WAVs through the system TTS service.
+
 For direct Gradle builds, select ABIs with `-PsandroidAbis=armeabi-v7a`, `-PsandroidAbis=arm64-v8a`, or a comma-separated combination. Omitting the property builds all three supported ABIs. Architecture-specific APKs are intended for direct installation; use the universal build when both ARM widths are needed. ARM32 builds still require testing on a physical 32-bit device; the existing ARM64 emulator results below do not establish ARM32 runtime compatibility.
 
 For a remote speech failure, reproduce it using Preview, reopen Sandroid if it closes, and press **Copy diagnostics**. Paste the report into the bug report. It includes the app/process architecture, the last speech operation, memory availability, and recent process exit reasons. On Android 12 and later, available native crash tombstones are decoded into the signal and crashing thread's backtrace. Reports are collected locally and copied only when the button is pressed. No speech text is recorded.

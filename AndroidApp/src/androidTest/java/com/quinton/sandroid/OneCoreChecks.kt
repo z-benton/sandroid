@@ -19,7 +19,7 @@ internal class OneCoreChecks(private val instrumentation: Instrumentation) {
         // An interrupted old installer left these files nonempty and permanently skipped them.
         // Damage a language container and a model before the first install in this process.
         listOf("OneCoreVoice/MSTTSLocEnUS.dat", "OneCoreVoice/M1033Eva.TDAT").forEach { path ->
-            val broken = java.io.File(context.filesDir, "voice-data/$path")
+            val broken = java.io.File(TtsStorage.context(context).filesDir, "voice-data/$path")
             broken.parentFile!!.mkdirs()
             context.assets.open(path).use { input ->
                 if (path.endsWith(".TDAT")) {
